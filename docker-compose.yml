@@ -1,0 +1,40 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ragdb
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d ragdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://rag:secret@db:5432/ragdb
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+      CSV_PATH: /data/bangla_products_5k.csv
+    volumes:
+      - ./data:/data:ro
+      - ./frontend:/frontend:ro
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
