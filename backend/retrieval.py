@@ -1,10 +1,11 @@
 import logging
+from collections.abc import Mapping
 from collections import OrderedDict
 
 import asyncpg
 
 from config import settings
-from database import get_conn
+from database import get_conn, uses_sqlite
 from models import Product, RetrievalMethod
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,27 @@ async def retrieve(query: str) -> tuple[list[Product], RetrievalMethod]:
 
 
 async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
+    if uses_sqlite():
+        return await _fetch_products(
+            conn,
+            f"""
+            SELECT {_SELECT}
+            FROM products
+            WHERE lower(base_item) = lower(?)
+               OR lower(name) LIKE lower(?)
+               OR lower(base_item) LIKE lower(?)
+            ORDER BY
+                CASE WHEN lower(base_item) = lower(?) THEN 0 ELSE 1 END,
+                rating DESC
+            LIMIT ?
+            """,
+            query,
+            f"%{query}%",
+            f"%{query}%",
+            query,
+            settings.max_retrieval_results,
+        )
+
     return await _fetch_products(
         conn,
         f"""
@@ -65,6 +87,9 @@ async def _fulltext_search(conn: asyncpg.Connection, query: str) -> list[Product
     tokens = query.split()
     if not tokens:
         return []
+
+    if uses_sqlite():
+        return await _sqlite_fallback_search(conn, tokens)
 
     tsquery_str = " | ".join(tokens)
 
@@ -98,7 +123,33 @@ async def _fetch_products(
     return [_row_to_product(row) for row in rows]
 
 
-def _row_to_product(row: asyncpg.Record) -> Product:
+async def _sqlite_fallback_search(
+    conn: asyncpg.Connection, tokens: list[str]
+) -> list[Product]:
+    where_clause = " AND ".join(
+        [
+            """lower(
+                coalesce(name, '') || ' ' ||
+                coalesce(base_item, '') || ' ' ||
+                coalesce(subcategory, '') || ' ' ||
+                coalesce(search_keywords, '')
+            ) LIKE lower(?)"""
+            for _ in tokens
+        ]
+    )
+    sql = f"""
+        SELECT {_SELECT}
+        FROM products
+        WHERE {where_clause}
+        ORDER BY rating DESC
+        LIMIT ?
+    """
+    args: list[object] = [f"%{token}%" for token in tokens]
+    args.append(settings.max_retrieval_results)
+    return await _fetch_products(conn, sql, *args)
+
+
+def _row_to_product(row: asyncpg.Record | Mapping[str, object]) -> Product:
     return Product(
         id=row["id"],
         name=row["name"],

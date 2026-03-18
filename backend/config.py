@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BACKEND_DIR = Path(__file__).resolve().parent
 DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
 DEFAULT_CSV_PATH = BACKEND_DIR.parent / "data" / "bangla_products_5k.csv"
+DEFAULT_DATABASE_URL = "sqlite:////tmp/rag-system.db"
 
 
 class Settings(BaseSettings):
@@ -13,8 +14,7 @@ class Settings(BaseSettings):
         env_file=DEFAULT_ENV_FILE, env_file_encoding="utf-8", extra="ignore"
     )
 
-    # Database
-    database_url: str
+    database_url: str = DEFAULT_DATABASE_URL
 
     # Groq
     groq_api_key: str | None = None
