@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 _CACHE_SIZE = 256
 _cache: OrderedDict[str, tuple[list[Product], RetrievalMethod]] = OrderedDict()
 
-# Columns to SELECT (keeps query lean)
 _SELECT = """
     id, name, base_item, subcategory, size,
     price_taka, discounted_price_taka, stock_qty, rating
@@ -19,9 +18,7 @@ _SELECT = """
 
 
 async def retrieve(query: str) -> tuple[list[Product], RetrievalMethod]:
-    
-    # Run the retrieval pipeline and return (products, method_used).
-
+    """Run the retrieval pipeline and return `(products, method_used)`."""
     cache_key = _normalize_query(query)
     cached = _cache.pop(cache_key, None)
     if cached is not None:
@@ -44,11 +41,7 @@ async def retrieve(query: str) -> tuple[list[Product], RetrievalMethod]:
     return result
 
 
-
-# Exact / ILIKE match is a strong signal — we can be more concise in the context we provide to the LLM.
-
 async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
-    # Try exact base_item match first, then ILIKE for partial matches
     return await _fetch_products(
         conn,
         f"""
@@ -68,16 +61,11 @@ async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
     )
 
 
-# Full-text search is more flexible but can be noisy — we provide more context to the LLM for better grounding.
-
 async def _fulltext_search(conn: asyncpg.Connection, query: str) -> list[Product]:
-    # Split query into tokens and build a tsquery with OR logic
-    # 'simple' dictionary is used — no stemming, works for Bangla tokens
     tokens = query.split()
     if not tokens:
         return []
 
-    # Build: token1 | token2 | token3
     tsquery_str = " | ".join(tokens)
 
     try:
@@ -95,13 +83,9 @@ async def _fulltext_search(conn: asyncpg.Connection, query: str) -> list[Product
             settings.max_retrieval_results,
         )
     except Exception as exc:
-        # Malformed tsquery (e.g. special chars) — degrade gracefully
         logger.debug("Full-text search failed for '%s': %s", query, exc)
         return []
 
-
-
-# Helper
 
 def clear_cache() -> None:
     _cache.clear()

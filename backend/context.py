@@ -63,6 +63,7 @@ class ResolvedQuery:
 def resolve(query: str, session: Session) -> ResolvedQuery:
     """Rule-based resolution, zero I/O. Rewrites the query if it's referential."""
     q = query.strip()
+    entity = _extract_entity(q)
 
     if _is_referential(q) and session.last_entity:
         qualifiers = _content_tokens(q)
@@ -76,8 +77,16 @@ def resolve(query: str, session: Session) -> ResolvedQuery:
             was_referential=True,
         )
 
+    if entity and any(word in q for word in SIGNAL_WORDS):
+        return ResolvedQuery(
+            original=q,
+            resolved=entity,
+            entity=entity,
+            was_referential=False,
+        )
+
     return ResolvedQuery(
-        original=q, resolved=q, entity=_extract_entity(q), was_referential=False
+        original=q, resolved=q, entity=entity, was_referential=False
     )
 
 
@@ -107,7 +116,9 @@ def _tokenize(query: str) -> list[str]:
     normalized = query
     for pattern, replacement in _MEASURE_PATTERNS:
         normalized = pattern.sub(replacement, normalized)
-    return [token.casefold() for token in _TOKEN_RE.findall(normalized)]
+    return [
+        _normalize_token(token.casefold()) for token in _TOKEN_RE.findall(normalized)
+    ]
 
 
 def _is_content_token(token: str) -> bool:
@@ -117,3 +128,10 @@ def _is_content_token(token: str) -> bool:
         and token not in GENERIC_WORDS
         and token not in PRONOUNS
     )
+
+
+def _normalize_token(token: str) -> str:
+    for suffix in ("ের", "এর"):
+        if token.endswith(suffix) and len(token) > len(suffix) + 1:
+            return token[: -len(suffix)]
+    return token

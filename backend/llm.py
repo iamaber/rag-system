@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncGenerator
 
 from groq import AsyncGroq
@@ -10,7 +11,7 @@ You are a helpful e-commerce assistant for a Bangladeshi online store.
 
 Rules:
 - Answer in the same language the user asked in. If they ask in Bangla, reply in Bangla. If in English, reply in English.
-- Only use the product data provided to you — do not make up prices or products.
+- Only use the JSON product data provided to you — do not make up prices, sizes, stock, or products.
 - If multiple products match, list them briefly instead of picking just one.
 - If no product is found, politely say that it is not available.
 - When asked about price for a product family or category, list the matching products and their prices.
@@ -22,103 +23,15 @@ Rules:
 - Keep answers short (2-3 sentences max, unless listing products).
 """
 
-FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
-    {
-        "role": "user",
-        "content": """Question: নুডুলস আছে?
-
-Relevant products:
-- নেসলে বিফ নুডুলস ১০০গ্রাম: মূল দাম: 103 BDT, ছাড়ের দাম: 102 BDT, stock: 163
-- রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম: মূল দাম: 118 BDT, ছাড়ের দাম: 110 BDT, stock: 98""",
-    },
-    {
-        "role": "assistant",
-        "content": """হ্যাঁ, আমাদের নুডুলস আছে। যেমন:
-- নেসলে বিফ নুডুলস ১০০গ্রাম: মূল দাম 103 BDT, ছাড়ের দাম 102 BDT
-- রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম: মূল দাম 118 BDT, ছাড়ের দাম 110 BDT""",
-    },
-    {
-        "role": "user",
-        "content": """Question: দাম কত?
-Active product context: নুডুলস
-
-Relevant products:
-- নেসলে বিফ নুডুলস ১০০গ্রাম: মূল দাম: 103 BDT, ছাড়ের দাম: 102 BDT, stock: 163
-- রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম: মূল দাম: 118 BDT, ছাড়ের দাম: 110 BDT, stock: 98""",
-    },
-    {
-        "role": "assistant",
-        "content": """নুডুলসের দামের কিছু উদাহরণ:
-- নেসলে বিফ নুডুলস ১০০গ্রাম: মূল দাম 103 BDT, ছাড়ের দাম 102 BDT
-- রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম: মূল দাম 118 BDT, ছাড়ের দাম 110 BDT""",
-    },
-    {
-        "role": "user",
-        "content": """Question: ৫ লিটারের দাম কত?
-Active product context: সয়াবিন তেল
-
-Relevant products:
-- সয়াবিন তেল ৫লিটার: মূল দাম: 836 BDT, ছাড়ের দাম: 786 BDT, stock: 47
-- সয়াবিন তেল ১লিটার: মূল দাম: 589 BDT, ছাড়ের দাম: 539 BDT, stock: 30""",
-    },
-    {
-        "role": "assistant",
-        "content": "সয়াবিন তেল ৫লিটারের মূল দাম 836 BDT, আর ছাড়ের দাম 786 BDT।",
-    },
-    {
-        "role": "user",
-        "content": """Question: এই পণ্যটাতে কি ছাড় আছে?
-Active product context: প্রিমিয়াম সুতি শাড়ি
-
-Relevant products:
-- প্রিমিয়াম সুতি শাড়ি ৬গজ: মূল দাম: 6985 BDT, ছাড়ের দাম: 6504 BDT, stock: 235""",
-    },
-    {
-        "role": "assistant",
-        "content": "হ্যাঁ, এতে ছাড় আছে। মূল দাম 6985 BDT, আর ছাড়ের দাম 6504 BDT।",
-    },
-    {
-        "role": "user",
-        "content": "Question: কফি মেশিন আছে?\n\nNo matching products found.",
-    },
-    {
-        "role": "assistant",
-        "content": "দুঃখিত, এই নামে কোনো পণ্য পাইনি। চাইলে অন্য পণ্যের নাম বলুন।",
-    },
-]
+_COMPLETION_OPTIONS = {"temperature": 0.1, "max_completion_tokens": 350}
 
 
 def _format_context(products: list[Product], query: str, resolved_query: str) -> str:
-    """Build the user message: query + matching products as a simple list."""
-    context_lines = [f"Question: {query}"]
-    if resolved_query != query:
-        context_lines.append(f"Active product context: {resolved_query}")
-
-    if not products:
-        context_lines.append("")
-        context_lines.append("No matching products found.")
-        return "\n".join(context_lines)
-
-    context_lines.extend(["", "Relevant products:"])
-    for p in products:
-        if (
-            p.price_taka
-            and p.discounted_price_taka
-            and p.price_taka != p.discounted_price_taka
-        ):
-            price = (
-                f"মূল দাম: {p.price_taka} BDT, "
-                f"ছাড়ের দাম: {p.discounted_price_taka} BDT"
-            )
-        elif p.price_taka:
-            price = f"দাম: {p.price_taka} BDT"
-        else:
-            price = "price unknown"
-
-        stock = f", stock: {p.stock_qty}" if p.stock_qty is not None else ""
-        context_lines.append(f"- {p.name}: {price}{stock}")
-
-    return "\n".join(context_lines)
+    return _payload_json(
+        question=query,
+        active_product_context=None if resolved_query == query else resolved_query,
+        products=[_product_payload(product) for product in products],
+    )
 
 
 # Lazy singletons — initialized on first use
@@ -140,10 +53,7 @@ def get_groq_client() -> AsyncGroq:
 
 async def generate(products: list[Product], query: str, resolved_query: str) -> str:
     response = await get_groq_client().chat.completions.create(
-        model=settings.groq_model,
-        messages=_messages(products, query, resolved_query),
-        temperature=0.1,
-        max_completion_tokens=350,
+        **_request_options(products, query, resolved_query)
     )
     return response.choices[0].message.content or ""
 
@@ -152,11 +62,8 @@ async def stream_generate(
     products: list[Product], query: str, resolved_query: str
 ) -> AsyncGenerator[str, None]:
     stream = await get_groq_client().chat.completions.create(
-        model=settings.groq_model,
-        messages=_messages(products, query, resolved_query),
         stream=True,
-        max_completion_tokens=350,
-        temperature=0.1,
+        **_request_options(products, query, resolved_query),
     )
     async for chunk in stream:
         delta = chunk.choices[0].delta.content
@@ -172,3 +79,114 @@ def _messages(
         *FEW_SHOT_EXAMPLES,
         {"role": "user", "content": _format_context(products, query, resolved_query)},
     ]
+
+
+def _request_options(
+    products: list[Product], query: str, resolved_query: str
+) -> dict[str, object]:
+    return {
+        "model": settings.groq_model,
+        "messages": _messages(products, query, resolved_query),
+        **_COMPLETION_OPTIONS,
+    }
+
+
+def _product_payload(product: Product) -> dict[str, object]:
+    return {
+        "id": product.id,
+        "name": product.name,
+        "base_item": product.base_item,
+        "subcategory": product.subcategory,
+        "size": product.size,
+        "price_taka": product.price_taka,
+        "discounted_price_taka": product.discounted_price_taka,
+        "stock_qty": product.stock_qty,
+        "rating": product.rating,
+    }
+
+
+def _payload_json(
+    question: str,
+    active_product_context: str | None,
+    products: list[dict[str, object]],
+) -> str:
+    return json.dumps(
+        {
+            "question": question,
+            "active_product_context": active_product_context,
+            "products": products,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def _user_example(
+    question: str,
+    active_product_context: str | None,
+    products: list[dict[str, object]],
+) -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": _payload_json(question, active_product_context, products),
+    }
+
+
+def _assistant_example(content: str) -> dict[str, str]:
+    return {"role": "assistant", "content": content}
+
+
+FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
+    _user_example(
+        question="দাম কত?",
+        active_product_context="নুডুলস",
+        products=[
+            {
+                "name": "নেসলে বিফ নুডুলস ১০০গ্রাম",
+                "base_item": "নুডুলস",
+                "size": "১০০গ্রাম",
+                "price_taka": 103,
+                "discounted_price_taka": 102,
+                "stock_qty": 163,
+            },
+            {
+                "name": "রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম",
+                "base_item": "নুডুলস",
+                "size": "১০০গ্রাম",
+                "price_taka": 118,
+                "discounted_price_taka": 110,
+                "stock_qty": 98,
+            },
+        ],
+    ),
+    _assistant_example(
+        """নুডুলসের দামের কিছু উদাহরণ:
+- নেসলে বিফ নুডুলস ১০০গ্রাম: মূল দাম 103 BDT, ছাড়ের দাম 102 BDT
+- রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম: মূল দাম 118 BDT, ছাড়ের দাম 110 BDT"""
+    ),
+    _user_example(
+        question="৫ লিটারের দাম কত?",
+        active_product_context="সয়াবিন তেল",
+        products=[
+            {
+                "name": "সয়াবিন তেল ৫লিটার",
+                "base_item": "সয়াবিন তেল",
+                "size": "৫লিটার",
+                "price_taka": 836,
+                "discounted_price_taka": 786,
+                "stock_qty": 47,
+            },
+            {
+                "name": "সয়াবিন তেল ১লিটার",
+                "base_item": "সয়াবিন তেল",
+                "size": "১লিটার",
+                "price_taka": 589,
+                "discounted_price_taka": 539,
+                "stock_qty": 30,
+            },
+        ],
+    ),
+    _assistant_example("সয়াবিন তেল ৫লিটারের মূল দাম 836 BDT, আর ছাড়ের দাম 786 BDT।"),
+    _user_example(question="কফি মেশিন আছে?", active_product_context=None, products=[]),
+    _assistant_example("দুঃখিত, এই নামে কোনো পণ্য পাইনি। চাইলে অন্য পণ্যের নাম বলুন।"),
+]
