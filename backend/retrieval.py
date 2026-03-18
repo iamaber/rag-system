@@ -49,17 +49,26 @@ async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
             f"""
             SELECT {_SELECT}
             FROM products
-            WHERE lower(base_item) = lower(?)
+            WHERE lower(subcategory) = lower(?)
+               OR lower(base_item) = lower(?)
                OR lower(name) LIKE lower(?)
                OR lower(base_item) LIKE lower(?)
+               OR lower(subcategory) LIKE lower(?)
             ORDER BY
-                CASE WHEN lower(base_item) = lower(?) THEN 0 ELSE 1 END,
+                CASE
+                    WHEN lower(subcategory) = lower(?) THEN 0
+                    WHEN lower(base_item) = lower(?) THEN 1
+                    ELSE 2
+                END,
                 rating DESC
             LIMIT ?
             """,
             query,
+            query,
             f"%{query}%",
             f"%{query}%",
+            f"%{query}%",
+            query,
             query,
             settings.max_retrieval_results,
         )
@@ -69,11 +78,17 @@ async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
         f"""
         SELECT {_SELECT}
         FROM products
-        WHERE base_item = $1
+        WHERE subcategory = $1
+           OR base_item = $1
            OR name ILIKE $2
            OR base_item ILIKE $2
+           OR subcategory ILIKE $2
         ORDER BY
-            CASE WHEN base_item = $1 THEN 0 ELSE 1 END,
+            CASE
+                WHEN subcategory = $1 THEN 0
+                WHEN base_item = $1 THEN 1
+                ELSE 2
+            END,
             rating DESC NULLS LAST
         LIMIT $3
         """,

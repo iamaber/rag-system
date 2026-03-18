@@ -3,7 +3,23 @@ from dataclasses import dataclass
 
 from session import Session
 
+
+def _normalize_token(token: str) -> str:
+    if token.endswith("দের"):
+        return token
+
+    for suffix in ("ির", "ের", "এর"):
+        if token.endswith(suffix) and len(token) > len(suffix) + 1:
+            return token[: -len(suffix)]
+    return token
+
+
+def _normalized_words(words: frozenset[str]) -> frozenset[str]:
+    return frozenset(_normalize_token(word.casefold()) for word in words)
+
+
 _TOKEN_RE = re.compile(r"[^\s!?.,:;()\"'`]+")
+_SIZE_TOKEN_RE = re.compile(r"^[0-9০-৯]+(লিটার|কেজি|গ্রাম|গজ)$")
 _MEASURE_PATTERNS = (
     (re.compile(r"([0-9০-৯]+)\s*লিটারের"), r"\1লিটার"),
     (re.compile(r"([0-9০-৯]+)\s*লিটার"), r"\1লিটার"),
@@ -17,7 +33,9 @@ _MEASURE_PATTERNS = (
 PRICE_WORDS = frozenset(
     ["দাম", "মূল্য", "কত", "টাকা", "দামটা", "মূল্যটা", "price", "cost", "how much"]
 )
-STOCK_WORDS = frozenset(["আছে", "পাওয়া যায়", "স্টক", "available", "stock"])
+STOCK_WORDS = frozenset(
+    ["আছে", "পাওয়া যায়", "স্টক", "available", "stock", "বিক্রি", "sell", "sells"]
+)
 DISCOUNT_WORDS = frozenset(
     ["discount", "discout", "discould", "offer", "sale", "ছাড়", "ছাড়", "ডিসকাউন্ট"]
 )
@@ -50,6 +68,9 @@ GENERIC_WORDS = frozenset(
         "for",
     ]
 )
+NORMALIZED_SIGNAL_WORDS = _normalized_words(SIGNAL_WORDS)
+NORMALIZED_GENERIC_WORDS = _normalized_words(GENERIC_WORDS)
+NORMALIZED_PRONOUNS = _normalized_words(PRONOUNS)
 
 
 @dataclass
@@ -98,7 +119,8 @@ def _is_referential(query: str) -> bool:
     if not any(word in query for word in SIGNAL_WORDS):
         return False
 
-    return len(_content_tokens(query)) <= 1
+    tokens = _content_tokens(query)
+    return not any(_is_entity_token(token) for token in tokens)
 
 
 def _extract_entity(query: str) -> str | None:
@@ -124,14 +146,11 @@ def _tokenize(query: str) -> list[str]:
 def _is_content_token(token: str) -> bool:
     return (
         len(token) >= 3
-        and token not in SIGNAL_WORDS
-        and token not in GENERIC_WORDS
-        and token not in PRONOUNS
+        and token not in NORMALIZED_SIGNAL_WORDS
+        and token not in NORMALIZED_GENERIC_WORDS
+        and token not in NORMALIZED_PRONOUNS
     )
 
 
-def _normalize_token(token: str) -> str:
-    for suffix in ("ের", "এর"):
-        if token.endswith(suffix) and len(token) > len(suffix) + 1:
-            return token[: -len(suffix)]
-    return token
+def _is_entity_token(token: str) -> bool:
+    return not _SIZE_TOKEN_RE.match(token)
