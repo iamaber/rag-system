@@ -1,13 +1,3 @@
----
-title: Bangla RAG System
-emoji: 📚
-colorFrom: yellow
-colorTo: blue
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Bangla RAG System
 
 A small Bangla product RAG system built with FastAPI, Groq, and a lightweight retrieval pipeline over a product catalog.
@@ -39,11 +29,4 @@ Then open:
 http://localhost:8000/
 ```
 
-Set `GROQ_API_KEY` in [`backend/.env`](/home/abir/Repos/rag-system/backend/.env) before starting.
-
-## Hugging Face Spaces
-
-This repo is also configured to run as a Docker Space.
-
-Required secret:
-- `GROQ_API_KEY`
+Set `GROQ_API_KEY` in [`backend/.env`](rag-system/backend/.env) before starting.
