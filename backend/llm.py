@@ -7,32 +7,32 @@ from config import settings
 from models import Product
 
 SYSTEM_PROMPT = """
-You are a helpful e-commerce assistant for a Bangladeshi online store.
+You are the chat assistant of a Bangladeshi online store.
 
 Rules:
 - Answer in the same language the user asked in. If they ask in Bangla, reply in Bangla. If in English, reply in English.
 - Only use the JSON product data provided to you — do not make up prices, sizes, stock, or products.
+- Treat questions about "your company", "your shop", "আপনাদের কোম্পানি", or "আপনাদের কাছে" as questions about this store's catalog and inventory.
+- If matching products are retrieved, that means this store has or sells those products.
+- For availability questions, answer yes/no first. Do not jump to prices unless the user asked for prices.
 - If multiple products match, list them briefly instead of picking just one.
 - If no product is found, politely say that it is not available.
 - When asked about price for a product family or category, list the matching products and their prices.
 - When asked about price, mention both the original and discounted price if they differ.
 - When asked about price, discount, or stock, answer only from the retrieved product fields.
 - Do not compare prices with phrases like "smaller than", "lower than", or similar wording. State the prices directly.
-- Do not answer about generic entities like a company unless that is explicitly in the product data.
-- For availability questions such as "Do you sell noodles?", answer from the retrieved products. Do not turn it into a company-information answer.
+- Do not claim any company metadata unless that metadata is explicitly present in the provided JSON.
 - If the active product context is provided, treat it as the subject of short follow-up questions like "দাম কত?" or "Is there a discount?".
 - Keep answers short (2-3 sentences max, unless listing products).
 """
 
-_COMPLETION_OPTIONS = {"temperature": 0.1, "max_completion_tokens": 350}
-
-
 def _format_context(products: list[Product], query: str, resolved_query: str) -> str:
-    return _payload_json(
-        question=query,
-        active_product_context=None if resolved_query == query else resolved_query,
-        products=[_product_payload(product) for product in products],
-    )
+    payload = {
+        "question": query,
+        "active_product_context": None if resolved_query == query else resolved_query,
+        "products": [_product_payload(product) for product in products],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 # Lazy singletons — initialized on first use
@@ -77,7 +77,6 @@ def _messages(
 ) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        *FEW_SHOT_EXAMPLES,
         {"role": "user", "content": _format_context(products, query, resolved_query)},
     ]
 
@@ -88,7 +87,8 @@ def _request_options(
     return {
         "model": settings.groq_model,
         "messages": _messages(products, query, resolved_query),
-        **_COMPLETION_OPTIONS,
+        "temperature": 0.1,
+        "max_completion_tokens": 350,
     }
 
 
@@ -104,90 +104,3 @@ def _product_payload(product: Product) -> dict[str, object]:
         "stock_qty": product.stock_qty,
         "rating": product.rating,
     }
-
-
-def _payload_json(
-    question: str,
-    active_product_context: str | None,
-    products: list[dict[str, object]],
-) -> str:
-    return json.dumps(
-        {
-            "question": question,
-            "active_product_context": active_product_context,
-            "products": products,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
-
-
-def _user_example(
-    question: str,
-    active_product_context: str | None,
-    products: list[dict[str, object]],
-) -> dict[str, str]:
-    return {
-        "role": "user",
-        "content": _payload_json(question, active_product_context, products),
-    }
-
-
-def _assistant_example(content: str) -> dict[str, str]:
-    return {"role": "assistant", "content": content}
-
-
-FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
-    _user_example(
-        question="দাম কত?",
-        active_product_context="নুডুলস",
-        products=[
-            {
-                "name": "নেসলে বিফ নুডুলস ১০০গ্রাম",
-                "base_item": "নুডুলস",
-                "size": "১০০গ্রাম",
-                "price_taka": 103,
-                "discounted_price_taka": 102,
-                "stock_qty": 163,
-            },
-            {
-                "name": "রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম",
-                "base_item": "নুডুলস",
-                "size": "১০০গ্রাম",
-                "price_taka": 118,
-                "discounted_price_taka": 110,
-                "stock_qty": 98,
-            },
-        ],
-    ),
-    _assistant_example(
-        """নুডুলসের দামের কিছু উদাহরণ:
-- নেসলে বিফ নুডুলস ১০০গ্রাম: মূল দাম 103 BDT, ছাড়ের দাম 102 BDT
-- রয়্যাল চিংড়ি নুডুলস ১০০গ্রাম: মূল দাম 118 BDT, ছাড়ের দাম 110 BDT"""
-    ),
-    _user_example(
-        question="৫ লিটারের দাম কত?",
-        active_product_context="সয়াবিন তেল",
-        products=[
-            {
-                "name": "সয়াবিন তেল ৫লিটার",
-                "base_item": "সয়াবিন তেল",
-                "size": "৫লিটার",
-                "price_taka": 836,
-                "discounted_price_taka": 786,
-                "stock_qty": 47,
-            },
-            {
-                "name": "সয়াবিন তেল ১লিটার",
-                "base_item": "সয়াবিন তেল",
-                "size": "১লিটার",
-                "price_taka": 589,
-                "discounted_price_taka": 539,
-                "stock_qty": 30,
-            },
-        ],
-    ),
-    _assistant_example("সয়াবিন তেল ৫লিটারের মূল দাম 836 BDT, আর ছাড়ের দাম 786 BDT।"),
-    _user_example(question="কফি মেশিন আছে?", active_product_context=None, products=[]),
-    _assistant_example("দুঃখিত, এই নামে কোনো পণ্য পাইনি। চাইলে অন্য পণ্যের নাম বলুন।"),
-]
