@@ -10,6 +10,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
+import answering
 import context as ctx
 import llm
 import retrieval
@@ -79,6 +80,34 @@ async def _prepare_chat(message: str, session: sess.Session) -> PreparedChat:
     )
 
 
+def _catalog_reply(prepared: PreparedChat, message: str) -> str | None:
+    return answering.generate_catalog_reply(
+        prepared.products, message, prepared.resolved_query
+    )
+
+
+async def _generate_response(prepared: PreparedChat, message: str) -> str:
+    direct_response = _catalog_reply(prepared, message)
+    if direct_response is not None:
+        return direct_response
+
+    return await llm.generate(prepared.products, message, prepared.resolved_query)
+
+
+async def _response_deltas(
+    prepared: PreparedChat, message: str
+) -> AsyncGenerator[str, None]:
+    direct_response = _catalog_reply(prepared, message)
+    if direct_response is not None:
+        yield direct_response
+        return
+
+    async for delta in llm.stream_generate(
+        prepared.products, message, prepared.resolved_query
+    ):
+        yield delta
+
+
 def _complete_chat(
     store: sess.SessionStore,
     session_id: str,
@@ -125,9 +154,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     prepared = await _prepare_chat(req.message, session)
 
     t_llm = time.monotonic()
-    response_text = await llm.generate(
-        prepared.products, req.message, prepared.resolved_query
-    )
+    response_text = await _generate_response(prepared, req.message)
     llm_ms = (time.monotonic() - t_llm) * 1000
     total_ms = (time.monotonic() - t0) * 1000
 
@@ -187,9 +214,7 @@ async def _stream_events(session_id: str, message: str) -> AsyncGenerator[dict, 
     t_llm = time.monotonic()
     full_response: list[str] = []
 
-    async for delta in llm.stream_generate(
-        prepared.products, message, prepared.resolved_query
-    ):
+    async for delta in _response_deltas(prepared, message):
         full_response.append(delta)
         yield {"event": "token", "data": json.dumps({"text": delta})}
 
