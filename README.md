@@ -29,4 +29,4 @@ Then open:
 http://localhost:8000/
 ```
 
-Set `GROQ_API_KEY` in [`backend/.env`](rag-system/backend/.env) before starting.
+Set `GROQ_API_KEY` in [`backend/.env`](backend/.env) before starting.
