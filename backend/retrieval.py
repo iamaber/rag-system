@@ -27,15 +27,16 @@ async def retrieve(query: str) -> tuple[list[Product], RetrievalMethod]:
         return cached
 
     async with get_conn() as conn:
-        for method, search in (
-            (RetrievalMethod.exact, _exact_match),
-            (RetrievalMethod.fulltext, _fulltext_search),
-        ):
-            products = await search(conn, query)
-            if products:
-                result = (products, method)
-                _remember(cache_key, result)
-                return result
+        for candidate in _query_variants(query):
+            for method, search in (
+                (RetrievalMethod.exact, _exact_match),
+                (RetrievalMethod.fulltext, _fulltext_search),
+            ):
+                products = await search(conn, candidate)
+                if products:
+                    result = (products, method)
+                    _remember(cache_key, result)
+                    return result
 
     result = ([], RetrievalMethod.none)
     _remember(cache_key, result)
@@ -54,6 +55,7 @@ async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
                OR lower(name) LIKE lower(?)
                OR lower(base_item) LIKE lower(?)
                OR lower(subcategory) LIKE lower(?)
+               OR lower(search_keywords) LIKE lower(?)
             ORDER BY
                 CASE
                     WHEN lower(subcategory) = lower(?) THEN 0
@@ -65,6 +67,7 @@ async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
             """,
             query,
             query,
+            f"%{query}%",
             f"%{query}%",
             f"%{query}%",
             f"%{query}%",
@@ -83,6 +86,7 @@ async def _exact_match(conn: asyncpg.Connection, query: str) -> list[Product]:
            OR name ILIKE $2
            OR base_item ILIKE $2
            OR subcategory ILIKE $2
+           OR search_keywords ILIKE $2
         ORDER BY
             CASE
                 WHEN subcategory = $1 THEN 0
@@ -180,6 +184,27 @@ def _row_to_product(row: asyncpg.Record | Mapping[str, object]) -> Product:
 
 def _normalize_query(query: str) -> str:
     return " ".join(query.split())
+
+
+def _query_variants(query: str) -> list[str]:
+    normalized = _normalize_query(query)
+    variants = [
+        normalized,
+        normalized.replace("য়", "য়"),
+        normalized.replace("য়", "য়"),
+        normalized.replace("ড়", "ড়").replace("ঢ়", "ঢ়"),
+        normalized.replace("ড়", "ড়").replace("ঢ়", "ঢ়"),
+    ]
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for variant in variants:
+        cleaned = _normalize_query(variant)
+        if not cleaned or cleaned in seen:
+            continue
+        unique.append(cleaned)
+        seen.add(cleaned)
+    return unique
 
 
 def _remember(
