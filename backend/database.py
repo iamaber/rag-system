@@ -3,7 +3,7 @@ import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, cast
 
 import asyncpg
 
@@ -36,33 +36,34 @@ class SQLiteConn:
     async def fetchval(self, sql: str, *args: object) -> object | None:
         cursor = self._conn.execute(sql, args)
         row = cursor.fetchone()
-        if row is None:
-            return None
-        return row[0]
+        return None if row is None else row[0]
+
+
+DBConn = asyncpg.Connection | SQLiteConn
 
 
 def uses_sqlite() -> bool:
     return settings.database_url.startswith("sqlite:///")
 
 
-async def get_pool() -> asyncpg.Pool:
-    global _pool
+def get_pool() -> asyncpg.Pool:
     if _pool is None:
         raise RuntimeError("Database pool not initialized. Call init_db() first.")
     return _pool
 
 
 @asynccontextmanager
-async def get_conn() -> AsyncGenerator[asyncpg.Connection | SQLiteConn, None]:
+async def get_conn() -> AsyncGenerator[DBConn, None]:
     if uses_sqlite():
         if _sqlite is None:
-            raise RuntimeError("SQLite connection not initialized. Call init_db() first.")
+            raise RuntimeError(
+                "SQLite connection not initialized. Call init_db() first."
+            )
         yield SQLiteConn(_sqlite)
         return
 
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        yield conn
+    async with get_pool().acquire() as conn:
+        yield cast(asyncpg.Connection, conn)
 
 
 async def init_db() -> None:
@@ -84,9 +85,10 @@ async def init_db() -> None:
         max_size=10,
         command_timeout=30,
     )
-    async with _pool.acquire() as conn:
-        await _setup_schema(conn)
-        await _seed_if_empty(conn)
+    async with _pool.acquire() as raw_conn:
+        pg_conn = cast(asyncpg.Connection, raw_conn)
+        await _setup_schema(pg_conn)
+        await _seed_if_empty(pg_conn)
     logger.info("Database initialized.")
 
 
@@ -100,15 +102,15 @@ async def close_db() -> None:
         _sqlite = None
 
 
-async def _setup_schema(conn: asyncpg.Connection | SQLiteConn) -> None:
-    if uses_sqlite():
+async def _setup_schema(conn: DBConn) -> None:
+    if isinstance(conn, SQLiteConn):
         await _setup_sqlite_schema(conn)
     else:
         await _setup_postgres_schema(conn)
     logger.info("Schema ready.")
 
 
-async def _setup_postgres_schema(conn: asyncpg.Connection | SQLiteConn) -> None:
+async def _setup_postgres_schema(conn: asyncpg.Connection) -> None:
     await conn.execute(
         """
         CREATE TABLE IF NOT EXISTS products (
@@ -129,26 +131,17 @@ async def _setup_postgres_schema(conn: asyncpg.Connection | SQLiteConn) -> None:
         """
     )
     await conn.execute(
-        """
-        ALTER TABLE products
-            ADD COLUMN IF NOT EXISTS search_vector tsvector
-        """
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS search_vector tsvector"
     )
     await conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_products_base_item
-            ON products (base_item)
-        """
+        "CREATE INDEX IF NOT EXISTS idx_products_base_item ON products (base_item)"
     )
     await conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_products_search_vector
-            ON products USING GIN(search_vector)
-        """
+        "CREATE INDEX IF NOT EXISTS idx_products_search_vector ON products USING GIN(search_vector)"
     )
 
 
-async def _setup_sqlite_schema(conn: asyncpg.Connection | SQLiteConn) -> None:
+async def _setup_sqlite_schema(conn: SQLiteConn) -> None:
     await conn.execute(
         """
         CREATE TABLE IF NOT EXISTS products (
@@ -176,16 +169,16 @@ async def _setup_sqlite_schema(conn: asyncpg.Connection | SQLiteConn) -> None:
     )
 
 
-async def _seed_if_empty(conn: asyncpg.Connection | SQLiteConn) -> None:
+async def _seed_if_empty(conn: DBConn) -> None:
     count = await conn.fetchval("SELECT COUNT(*) FROM products")
-    if count and count > 0:
+    if count:
         logger.info("Products table already seeded (%d rows). Skipping.", count)
         return
 
     logger.info("Seeding products from CSV: %s", settings.csv_path)
     rows = _load_csv(settings.csv_path)
 
-    if uses_sqlite():
+    if isinstance(conn, SQLiteConn):
         await conn.executemany(
             """
             INSERT OR IGNORE INTO products
@@ -208,8 +201,6 @@ async def _seed_if_empty(conn: asyncpg.Connection | SQLiteConn) -> None:
             """,
             rows,
         )
-
-    if not uses_sqlite():
         await conn.execute(
             """
             UPDATE products
@@ -227,28 +218,25 @@ async def _seed_if_empty(conn: asyncpg.Connection | SQLiteConn) -> None:
 
 
 def _load_csv(path: str) -> list[tuple]:
-    rows = []
     with open(path, encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(
-                (
-                    row["id"],
-                    row["name"],
-                    row.get("subcategory", ""),
-                    row.get("base_item", ""),
-                    row.get("size", ""),
-                    _int(row.get("price_taka")),
-                    _int(row.get("discounted_price_taka")),
-                    _int(row.get("stock_qty")),
-                    _float(row.get("rating")),
-                    _int(row.get("reviews_count")),
-                    row.get("sku", ""),
-                    row.get("description", ""),
-                    row.get("search_keywords", ""),
-                )
+        return [
+            (
+                row["id"],
+                row["name"],
+                row.get("subcategory", ""),
+                row.get("base_item", ""),
+                row.get("size", ""),
+                _int(row.get("price_taka")),
+                _int(row.get("discounted_price_taka")),
+                _int(row.get("stock_qty")),
+                _float(row.get("rating")),
+                _int(row.get("reviews_count")),
+                row.get("sku", ""),
+                row.get("description", ""),
+                row.get("search_keywords", ""),
             )
-    return rows
+            for row in csv.DictReader(f)
+        ]
 
 
 def _int(val: str | None) -> int | None:
