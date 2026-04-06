@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from groq import AsyncGroq
 
@@ -25,6 +26,7 @@ Rules:
 - If the active product context is provided, treat it as the subject of short follow-up questions like "দাম কত?" or "Is there a discount?".
 - Keep answers short (2-3 sentences max, unless listing products).
 """
+
 
 def _format_context(products: list[Product], query: str, resolved_query: str) -> str:
     payload = {
@@ -83,7 +85,7 @@ def _messages(
 
 def _request_options(
     products: list[Product], query: str, resolved_query: str
-) -> dict[str, object]:
+) -> dict[str, Any]:
     return {
         "model": settings.groq_model,
         "messages": _messages(products, query, resolved_query),
