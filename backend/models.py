@@ -65,5 +65,6 @@ class SessionResetRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     db_connected: bool
+    llm_configured: bool
     uptime_seconds: float
     product_count: int | None = None

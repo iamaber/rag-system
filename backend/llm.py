@@ -41,10 +41,17 @@ def _format_context(products: list[Product], query: str, resolved_query: str) ->
 _groq_client: AsyncGroq | None = None
 
 
+def is_configured() -> bool:
+    return bool(settings.groq_api_key)
+
+
 def _require_groq_api_key() -> str:
     if settings.groq_api_key:
         return settings.groq_api_key
-    raise RuntimeError("GROQ_API_KEY is not set. Set it in backend/.env.")
+    raise RuntimeError(
+        "GROQ_API_KEY is not set. Set it as a Hugging Face Space secret or in "
+        "your .env file (see .env.example)."
+    )
 
 
 def get_groq_client() -> AsyncGroq:
