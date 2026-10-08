@@ -5,12 +5,19 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.cache/
 
-.env
 .venv/
 venv/
+
+.env
+.env.*
+!.env.example
 
 dist/
 build/
 htmlcov/
 coverage.xml
+
+*.db
+*.sqlite3
