@@ -13,3 +13,15 @@ dependencies = [
     "sse-starlette>=3.3.2",
     "uvicorn[standard]>=0.42.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = ["tests"]
