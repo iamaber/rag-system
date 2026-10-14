@@ -14,6 +14,8 @@ license: mit
 A small Bangla product RAG system built with FastAPI, Groq, and a lightweight
 retrieval pipeline over a product catalog.
 
+**Project links:** [live demo](https://huggingface.co/spaces/iamaber/bangla-rag-system) · [source](https://github.com/iamaber/rag-system) · [portfolio](https://iamaber.github.io/portfolio-website/)
+
 The app:
 
 - retrieves matching Bangla products from the dataset
