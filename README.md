@@ -1,14 +1,3 @@
----
-title: Bangla RAG System
-emoji: 📚
-colorFrom: yellow
-colorTo: blue
-sdk: docker
-app_port: 7860
-pinned: false
-license: mit
----
-
 # Bangla RAG System
 
 A small Bangla product RAG system built with FastAPI, Groq, and a lightweight
