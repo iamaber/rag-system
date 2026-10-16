@@ -39,9 +39,30 @@ STOCK_WORDS = frozenset(
 DISCOUNT_WORDS = frozenset(
     ["discount", "discout", "discould", "offer", "sale", "ছাড়", "ছাড়", "ডিসকাউন্ট"]
 )
-# Pronouns that explicitly refer to something already said
+# Pronouns that explicitly refer to something already said, including the
+# inflected genitive forms ("এটার", "ওটার") used in follow-up questions.
 PRONOUNS = frozenset(
-    ["এটা", "এটি", "ওটা", "ওটি", "সেটা", "সেটি", "এর", "তার", "it", "that", "this"]
+    [
+        "এটা",
+        "এটি",
+        "ওটা",
+        "ওটি",
+        "সেটা",
+        "সেটি",
+        "এটার",
+        "এটির",
+        "ওটার",
+        "ওটির",
+        "সেটার",
+        "সেটির",
+        "এর",
+        "তার",
+        "এদের",
+        "ওদের",
+        "it",
+        "that",
+        "this",
+    ]
 )
 
 SIGNAL_WORDS = PRICE_WORDS | STOCK_WORDS | DISCOUNT_WORDS
@@ -128,7 +149,7 @@ def resolve(query: str, session: Session) -> ResolvedQuery:
 
 def _is_referential(query: str) -> bool:
     """True if query clearly refers to something already mentioned."""
-    if any(p in query for p in PRONOUNS):
+    if set(_tokenize(query)) & NORMALIZED_PRONOUNS:
         return True
 
     if not any(word in query for word in SIGNAL_WORDS):

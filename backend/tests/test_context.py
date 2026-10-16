@@ -27,3 +27,27 @@ def test_resolve_keeps_plain_query_without_history() -> None:
     assert resolved.resolved == "শাওমি ইয়ারবাড"
     assert resolved.entity == "শাওমি ইয়ারবাড"
     assert resolved.was_referential is False
+
+
+def test_english_words_containing_pronoun_substrings_are_not_referential() -> None:
+    session = Session(session_id="s4")
+    session.last_entity = "লেমন বিস্কুট"
+
+    digital = resolve("digital camera price", session)
+    with_shipping = resolve("price with delivery", session)
+
+    assert digital.was_referential is False
+    assert digital.entity == "digital camera"
+    assert with_shipping.was_referential is False
+    assert with_shipping.entity == "with delivery"
+
+
+def test_resolve_handles_inflected_bangla_pronouns() -> None:
+    session = Session(session_id="s5")
+    session.last_entity = "লেমন বিস্কুট"
+
+    for follow_up in ("এটার দাম কত?", "ওটার দাম কত?", "এটির দাম কত?"):
+        resolved = resolve(follow_up, session)
+
+        assert resolved.was_referential is True
+        assert resolved.resolved == "লেমন বিস্কুট"
