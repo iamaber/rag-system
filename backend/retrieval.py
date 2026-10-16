@@ -20,7 +20,7 @@ _SELECT = """
 
 async def retrieve(query: str) -> tuple[list[Product], RetrievalMethod]:
     """Run the retrieval pipeline and return `(products, method_used)`."""
-    cache_key = _normalize_query(query)
+    cache_key = _cache_key(query)
     cached = _cache.pop(cache_key, None)
     if cached is not None:
         _cache[cache_key] = cached
@@ -110,24 +110,22 @@ async def _fulltext_search(conn: asyncpg.Connection, query: str) -> list[Product
     if uses_sqlite():
         return await _sqlite_fallback_search(conn, tokens)
 
-    tsquery_str = " | ".join(tokens)
-
     try:
         return await _fetch_products(
             conn,
             f"""
             SELECT {_SELECT},
-                   ts_rank(search_vector, to_tsquery('simple', $1)) AS rank
+                   ts_rank(search_vector, websearch_to_tsquery('simple', $1)) AS rank
             FROM products
-            WHERE search_vector @@ to_tsquery('simple', $1)
+            WHERE search_vector @@ websearch_to_tsquery('simple', $1)
             ORDER BY rank DESC, rating DESC NULLS LAST
             LIMIT $2
             """,
-            tsquery_str,
+            query,
             settings.max_retrieval_results,
         )
     except Exception as exc:
-        logger.debug("Full-text search failed for '%s': %s", query, exc)
+        logger.warning("Full-text search failed for '%s': %s", query, exc)
         return []
 
 
