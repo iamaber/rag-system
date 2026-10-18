@@ -130,6 +130,7 @@ async def _fulltext_search(conn: asyncpg.Connection, query: str) -> list[Product
 
 
 def clear_cache() -> None:
+    """Drop cached results; call after any catalog write."""
     _cache.clear()
 
 
@@ -182,6 +183,21 @@ def _row_to_product(row: asyncpg.Record | Mapping[str, object]) -> Product:
 
 def _normalize_query(query: str) -> str:
     return " ".join(query.split())
+
+
+def _cache_key(query: str) -> str:
+    """Identify cached results by database, result cap and normalized query.
+
+    A cache entry is only valid for the database and limit it was computed
+    with, so both are part of the key.
+    """
+    return "\x00".join(
+        (
+            settings.database_url,
+            str(settings.max_retrieval_results),
+            _normalize_query(query),
+        )
+    )
 
 
 def _query_variants(query: str) -> list[str]:

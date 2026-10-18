@@ -16,6 +16,19 @@ def test_query_variants_include_bengali_spelling_variants() -> None:
     assert retrieval._query_variants("কয়") == ["কয়", "কয়"]
 
 
+def test_cache_key_changes_with_database_and_result_cap(monkeypatch) -> None:
+    import config
+
+    base = retrieval._cache_key("মিনিকেট চাল")
+
+    monkeypatch.setattr(config.settings, "max_retrieval_results", 9)
+    assert retrieval._cache_key("মিনিকেট চাল") != base
+
+    monkeypatch.setattr(config.settings, "max_retrieval_results", 5)
+    monkeypatch.setattr(config.settings, "database_url", "sqlite:///other.db")
+    assert retrieval._cache_key("মিনিকেট চাল") != base
+
+
 async def test_exact_match_by_base_item(catalog_db) -> None:
     products, method = await retrieval.retrieve("লেমন বিস্কুট")
 
