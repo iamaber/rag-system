@@ -89,6 +89,7 @@ async def init_db() -> None:
         pg_conn = cast(asyncpg.Connection, raw_conn)
         await _setup_schema(pg_conn)
         await _seed_if_empty(pg_conn)
+        await _backfill_search_vectors(pg_conn)
     logger.info("Database initialized.")
 
 
@@ -139,6 +140,55 @@ async def _setup_postgres_schema(conn: asyncpg.Connection) -> None:
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_products_search_vector ON products USING GIN(search_vector)"
     )
+    await conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION products_search_vector_update() RETURNS trigger AS $$
+        BEGIN
+            NEW.search_vector := to_tsvector(
+                'simple',
+                coalesce(NEW.name, '') || ' ' ||
+                coalesce(NEW.base_item, '') || ' ' ||
+                coalesce(NEW.subcategory, '') || ' ' ||
+                coalesce(NEW.search_keywords, '')
+            );
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+        """
+    )
+    await conn.execute(
+        "DROP TRIGGER IF EXISTS trg_products_search_vector ON products"
+    )
+    await conn.execute(
+        """
+        CREATE TRIGGER trg_products_search_vector
+        BEFORE INSERT OR UPDATE OF name, base_item, subcategory, search_keywords
+        ON products
+        FOR EACH ROW EXECUTE FUNCTION products_search_vector_update()
+        """
+    )
+
+
+async def _backfill_search_vectors(conn: asyncpg.Connection) -> None:
+    """Index rows that predate the column or were inserted without the trigger.
+
+    Runs on every startup so restored dumps and pre-existing volumes are indexed
+    too, not just the initial seed.
+    """
+    status = await conn.execute(
+        """
+        UPDATE products
+        SET search_vector = to_tsvector(
+            'simple',
+            coalesce(name, '') || ' ' ||
+            coalesce(base_item, '') || ' ' ||
+            coalesce(subcategory, '') || ' ' ||
+            coalesce(search_keywords, '')
+        )
+        WHERE search_vector IS NULL
+        """
+    )
+    logger.info("search_vector backfill: %s", status)
 
 
 async def _setup_sqlite_schema(conn: SQLiteConn) -> None:
@@ -207,18 +257,6 @@ async def _seed_if_empty(conn: DBConn) -> None:
             ON CONFLICT (id) DO NOTHING
             """,
             rows,
-        )
-        await conn.execute(
-            """
-            UPDATE products
-            SET search_vector = to_tsvector(
-                'simple',
-                coalesce(name, '') || ' ' ||
-                coalesce(base_item, '') || ' ' ||
-                coalesce(subcategory, '') || ' ' ||
-                coalesce(search_keywords, '')
-            )
-            """
         )
 
     logger.info("Seeded %d products.", len(rows))
