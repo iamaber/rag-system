@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import logging
 import sqlite3
@@ -12,7 +13,6 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
-_sqlite: sqlite3.Connection | None = None
 
 
 class SQLiteConn:
@@ -20,23 +20,36 @@ class SQLiteConn:
         self._conn = conn
 
     async def execute(self, sql: str, *args: object) -> None:
+        await asyncio.to_thread(self._execute, sql, args)
+
+    def _execute(self, sql: str, args: tuple[object, ...]) -> None:
         self._conn.execute(sql, args)
         self._conn.commit()
 
     async def executemany(
         self, sql: str, rows: list[tuple[object, ...]] | list[tuple]
     ) -> None:
+        await asyncio.to_thread(self._executemany, sql, rows)
+
+    def _executemany(self, sql: str, rows: list[tuple]) -> None:
         self._conn.executemany(sql, rows)
         self._conn.commit()
 
     async def fetch(self, sql: str, *args: object) -> list[sqlite3.Row]:
-        cursor = self._conn.execute(sql, args)
-        return cursor.fetchall()
+        return await asyncio.to_thread(self._fetch, sql, args)
+
+    def _fetch(self, sql: str, args: tuple[object, ...]) -> list[sqlite3.Row]:
+        return self._conn.execute(sql, args).fetchall()
 
     async def fetchval(self, sql: str, *args: object) -> object | None:
-        cursor = self._conn.execute(sql, args)
-        row = cursor.fetchone()
+        return await asyncio.to_thread(self._fetchval, sql, args)
+
+    def _fetchval(self, sql: str, args: tuple[object, ...]) -> object | None:
+        row = self._conn.execute(sql, args).fetchone()
         return None if row is None else row[0]
+
+    async def close(self) -> None:
+        await asyncio.to_thread(self._conn.close)
 
 
 DBConn = asyncpg.Connection | SQLiteConn
@@ -55,27 +68,36 @@ def get_pool() -> asyncpg.Pool:
 @asynccontextmanager
 async def get_conn() -> AsyncGenerator[DBConn, None]:
     if uses_sqlite():
-        if _sqlite is None:
-            raise RuntimeError(
-                "SQLite connection not initialized. Call init_db() first."
-            )
-        yield SQLiteConn(_sqlite)
+        # One connection per request: SQLite connections are not safe to share
+        # between concurrent callers, and opening one is cheap.
+        conn = _connect_sqlite(_sqlite_path())
+        try:
+            yield conn
+        finally:
+            await conn.close()
         return
 
     async with get_pool().acquire() as conn:
         yield cast(asyncpg.Connection, conn)
 
 
+def _connect_sqlite(path: Path) -> SQLiteConn:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # check_same_thread=False because statements run in worker threads.
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return SQLiteConn(conn)
+
+
 async def init_db() -> None:
-    global _pool, _sqlite
+    global _pool
     if uses_sqlite():
-        db_path = _sqlite_path()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        _sqlite = sqlite3.connect(db_path, check_same_thread=False)
-        _sqlite.row_factory = sqlite3.Row
-        conn = SQLiteConn(_sqlite)
-        await _setup_schema(conn)
-        await _seed_if_empty(conn)
+        conn = _connect_sqlite(_sqlite_path())
+        try:
+            await _setup_schema(conn)
+            await _seed_if_empty(conn)
+        finally:
+            await conn.close()
         logger.info("SQLite database initialized.")
         return
 
@@ -94,13 +116,10 @@ async def init_db() -> None:
 
 
 async def close_db() -> None:
-    global _pool, _sqlite
+    global _pool
     if _pool:
         await _pool.close()
         _pool = None
-    if _sqlite:
-        _sqlite.close()
-        _sqlite = None
 
 
 async def _setup_schema(conn: DBConn) -> None:

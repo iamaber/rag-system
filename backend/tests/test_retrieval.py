@@ -1,3 +1,5 @@
+import asyncio
+
 import retrieval
 from models import RetrievalMethod
 
@@ -69,3 +71,12 @@ async def test_repeated_query_is_served_from_cache(catalog_db) -> None:
     retrieval.clear_cache()
     third_products, _ = await retrieval.retrieve("মিনিকেট চাল")
     assert third_products is not first_products
+
+
+async def test_concurrent_retrievals_use_independent_connections(catalog_db) -> None:
+    results = await asyncio.gather(
+        *(retrieval.retrieve("লেমন বিস্কুট") for _ in range(20))
+    )
+
+    assert all(method is RetrievalMethod.exact for _, method in results)
+    assert all([product.id for product in products] == ["PRD-1"] for products, _ in results)
