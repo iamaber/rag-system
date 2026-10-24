@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -27,6 +28,7 @@ from models import (
     StreamMetadata,
     Timing,
 )
+from security import RateLimiter, RequestGuard
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -54,6 +56,14 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Bangla RAG System", lifespan=lifespan)
+app.add_middleware(
+    RequestGuard,
+    token=settings.api_token,
+    limiter=RateLimiter(settings.rate_limit_per_minute),
+)
+
+# Bound how many requests can hold a paid upstream generation at once.
+_LLM_SLOTS = asyncio.Semaphore(settings.max_concurrent_llm_calls)
 
 
 # shared logic used by both /chat and /chat/stream
@@ -103,7 +113,8 @@ async def _generate_response(prepared: PreparedChat, message: str) -> str:
     if not llm.is_configured():
         return _MISSING_KEY_MESSAGE
 
-    return await llm.generate(prepared.products, message, prepared.resolved_query)
+    async with _LLM_SLOTS:
+        return await llm.generate(prepared.products, message, prepared.resolved_query)
 
 
 async def _response_deltas(
@@ -118,10 +129,11 @@ async def _response_deltas(
         yield _MISSING_KEY_MESSAGE
         return
 
-    async for delta in llm.stream_generate(
-        prepared.products, message, prepared.resolved_query
-    ):
-        yield delta
+    async with _LLM_SLOTS:
+        async for delta in llm.stream_generate(
+            prepared.products, message, prepared.resolved_query
+        ):
+            yield delta
 
 
 def _complete_chat(

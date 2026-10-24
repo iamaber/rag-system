@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     max_retrieval_results: int = 5
     csv_path: str = str(DEFAULT_CSV_PATH)
 
+    # Abuse protection for the LLM-backed endpoints
+    api_token: str | None = None
+    rate_limit_per_minute: int = 30
+    max_concurrent_llm_calls: int = 4
+
     @field_validator("csv_path", mode="before")
     @classmethod
     def _resolve_csv_path(cls, value: str | Path) -> str:
