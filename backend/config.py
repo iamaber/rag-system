@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # App
     session_ttl_seconds: int = 1800  # 30 minutes
+    max_sessions: int = 5000
     max_retrieval_results: int = 5
     csv_path: str = str(DEFAULT_CSV_PATH)
 

@@ -43,7 +43,10 @@ _MISSING_KEY_MESSAGE = (
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
-    sess.init_store(ttl_seconds=settings.session_ttl_seconds)
+    sess.init_store(
+        ttl_seconds=settings.session_ttl_seconds,
+        max_sessions=settings.max_sessions,
+    )
     try:
         yield
     finally:
