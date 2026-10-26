@@ -5,26 +5,13 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of turns kept per session
-MAX_HISTORY = 20
-
 # Expired sessions are swept at most this often, instead of on every request
 _SWEEP_INTERVAL_SECONDS = 60.0
 
 
 @dataclass
-class Turn:
-    role: str  # "user" or "assistant"
-    content: str
-    # The product entity resolved during this turn (if any)
-    resolved_entity: str | None = None
-    timestamp: float = field(default_factory=time.monotonic)
-
-
-@dataclass
 class Session:
     session_id: str
-    history: list[Turn] = field(default_factory=list)
     last_entity: str | None = None  # last product entity mentioned
     created_at: float = field(default_factory=time.monotonic)
     last_active: float = field(default_factory=time.monotonic)
@@ -49,23 +36,6 @@ class SessionStore:
             self._sessions.move_to_end(session_id)
         session.last_active = time.monotonic()
         return session
-
-    def add_turn(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        resolved_entity: str | None = None,
-    ) -> None:
-        session = self.get(session_id)
-        session.history.append(
-            Turn(role=role, content=content, resolved_entity=resolved_entity)
-        )
-        # Keep history bounded
-        if len(session.history) > MAX_HISTORY:
-            session.history = session.history[-MAX_HISTORY:]
-        if resolved_entity:
-            session.last_entity = resolved_entity
 
     def update_last_entity(self, session_id: str, entity: str) -> None:
         session = self.get(session_id)

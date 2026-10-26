@@ -139,16 +139,12 @@ async def _response_deltas(
 def _complete_chat(
     store: sess.SessionStore,
     session_id: str,
-    message: str,
-    response: str,
     prepared: PreparedChat,
     llm_ms: float,
     total_ms: float,
     stream: bool = False,
 ) -> None:
     entity = prepared.entity or _entity_from_products(prepared.products)
-    store.add_turn(session_id, "user", message, resolved_entity=entity)
-    store.add_turn(session_id, "assistant", response)
     if entity:
         store.update_last_entity(session_id, entity)
 
@@ -189,8 +185,6 @@ async def chat(req: ChatRequest) -> ChatResponse:
     _complete_chat(
         store=store,
         session_id=req.session_id,
-        message=req.message,
-        response=response_text,
         prepared=prepared,
         llm_ms=llm_ms,
         total_ms=total_ms,
@@ -240,10 +234,8 @@ async def _stream_events(session_id: str, message: str) -> AsyncGenerator[dict, 
     }
 
     t_llm = time.monotonic()
-    full_response: list[str] = []
 
     async for delta in _response_deltas(prepared, message):
-        full_response.append(delta)
         yield {"event": "token", "data": json.dumps({"text": delta})}
 
     llm_ms = (time.monotonic() - t_llm) * 1000
@@ -256,12 +248,9 @@ async def _stream_events(session_id: str, message: str) -> AsyncGenerator[dict, 
         ),
     }
 
-    response_text = "".join(full_response)
     _complete_chat(
         store=store,
         session_id=session_id,
-        message=message,
-        response=response_text,
         prepared=prepared,
         llm_ms=llm_ms,
         total_ms=total_ms,
