@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -39,6 +39,9 @@ _MISSING_KEY_MESSAGE = (
     "This deployment has no LLM API key configured, so I can't answer open-ended "
     "questions. Price, discount, stock, and availability lookups still work. "
     "Set the GROQ_API_KEY secret (see .env.example) to enable full answers."
+)
+_UPSTREAM_ERROR_MESSAGE = (
+    "The answer service is unavailable right now. Please try again."
 )
 
 
@@ -113,8 +116,16 @@ async def _generate_response(prepared: PreparedChat, message: str) -> str:
     if not llm.is_configured():
         return _MISSING_KEY_MESSAGE
 
-    async with _LLM_SLOTS:
-        return await llm.generate(prepared.products, message, prepared.resolved_query)
+    try:
+        async with _LLM_SLOTS:
+            return await llm.generate(
+                prepared.products, message, prepared.resolved_query
+            )
+    except Exception as exc:
+        logger.warning("LLM generation failed: %s", exc)
+        raise HTTPException(
+            status_code=502, detail=_UPSTREAM_ERROR_MESSAGE
+        ) from exc
 
 
 async def _response_deltas(
@@ -235,8 +246,16 @@ async def _stream_events(session_id: str, message: str) -> AsyncGenerator[dict, 
 
     t_llm = time.monotonic()
 
-    async for delta in _response_deltas(prepared, message):
-        yield {"event": "token", "data": json.dumps({"text": delta})}
+    try:
+        async for delta in _response_deltas(prepared, message):
+            yield {"event": "token", "data": json.dumps({"text": delta})}
+    except Exception as exc:
+        logger.warning("Streaming generation failed: %s", exc)
+        yield {
+            "event": "error",
+            "data": json.dumps({"detail": _UPSTREAM_ERROR_MESSAGE}),
+        }
+        return
 
     llm_ms = (time.monotonic() - t_llm) * 1000
     total_ms = (time.monotonic() - t0) * 1000
