@@ -265,7 +265,62 @@
     <script>
         // Generate a random session ID for this tab
         const sessionId = Math.random().toString(36).substring(2, 15);
-        
+
+        // Optional shared token for deployments that require one
+        let apiToken = sessionStorage.getItem('api_token') || '';
+
+        function authHeaders(headers = {}) {
+            return apiToken ? { ...headers, 'X-API-Token': apiToken } : headers;
+        }
+
+        async function promptForToken() {
+            const value = window.prompt('This deployment requires an API token:');
+            if (!value || !value.trim()) return false;
+            apiToken = value.trim();
+            sessionStorage.setItem('api_token', apiToken);
+            return true;
+        }
+
+        async function errorDetail(response) {
+            try {
+                const payload = await response.json();
+                if (payload.detail) return payload.detail;
+            } catch (err) { /* ignore non-JSON errors */ }
+            return `Request failed (${response.status}).`;
+        }
+
+        // Read a server-sent-event stream from a fetch response
+        async function consumeStream(response, handlers) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            const dispatch = (block) => {
+                let eventName = 'message';
+                const dataLines = [];
+                for (const line of block.split('\n')) {
+                    if (line.startsWith('event:')) eventName = line.slice(6).trim();
+                    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+                }
+                const handler = handlers[eventName];
+                if (handler) handler(dataLines.join('\n'));
+            };
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer = (buffer + decoder.decode(value, { stream: true }))
+                    .replace(/\r\n/g, '\n');
+                let boundary;
+                while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                    dispatch(buffer.slice(0, boundary));
+                    buffer = buffer.slice(boundary + 2);
+                }
+            }
+            buffer = (buffer + decoder.decode()).replace(/\r\n/g, '\n');
+            if (buffer.trim()) dispatch(buffer);
+        }
+
         const chatForm = document.getElementById('chatForm');
         const userInput = document.getElementById('userInput');
         const sendBtn = document.getElementById('sendBtn');
@@ -338,67 +393,89 @@
             chatContainer.appendChild(astMsg);
             scrollToBottom();
 
-            // 3. Connect to EventSource
-            const url = '/chat/stream?session_id=' + encodeURIComponent(sessionId) + '&message=' + encodeURIComponent(message);
-            const eventSource = new EventSource(url);
-
             let metadata = null;
             let fullText = '';
 
-            eventSource.addEventListener('metadata', (e) => {
-                metadata = JSON.parse(e.data);
-            });
-
-            eventSource.addEventListener('token', (e) => {
-                const data = JSON.parse(e.data);
-                fullText += data.text;
-                astContent.textContent = fullText;
-                astContent.appendChild(cursor); // Keep cursor at the end
-                scrollToBottom();
-            });
-
-            eventSource.addEventListener('done', (e) => {
-                const timingData = JSON.parse(e.data);
-                eventSource.close();
-                
-                // Remove cursor
+            const finish = () => {
                 if (cursor.parentNode) cursor.parentNode.removeChild(cursor);
-                
-                // Add Metrics
-                if (metadata) {
-                    const finalMetrics = {
-                        ...metadata,
-                        llm_ms: timingData.llm_ms,
-                        total_ms: timingData.total_ms
-                    };
-                    const metricsEl = createMetricsElement(finalMetrics);
-                    astMsg.appendChild(metricsEl);
-                }
-
                 userInput.disabled = false;
                 sendBtn.disabled = false;
                 userInput.focus();
-                scrollToBottom();
+            };
+
+            const requestStream = () => fetch('/chat/stream', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ session_id: sessionId, message })
             });
 
-            eventSource.onerror = (err) => {
-                console.error("EventSource failed:", err);
-                eventSource.close();
-                if (cursor.parentNode) cursor.parentNode.removeChild(cursor);
-                astContent.textContent += "\n[Connection Error]";
-                userInput.disabled = false;
-                sendBtn.disabled = false;
-            };
+            try {
+                let response = await requestStream();
+                if (response.status === 401 && await promptForToken()) {
+                    response = await requestStream();
+                }
+                if (!response.ok || !response.body) {
+                    astContent.textContent = await errorDetail(response);
+                    finish();
+                    return;
+                }
+
+                await consumeStream(response, {
+                    metadata: (data) => {
+                        metadata = JSON.parse(data);
+                    },
+                    token: (data) => {
+                        const payload = JSON.parse(data);
+                        fullText += payload.text;
+                        astContent.textContent = fullText;
+                        astContent.appendChild(cursor); // Keep cursor at the end
+                        scrollToBottom();
+                    },
+                    done: (data) => {
+                        const timingData = JSON.parse(data);
+                        if (metadata) {
+                            astMsg.appendChild(createMetricsElement({
+                                ...metadata,
+                                llm_ms: timingData.llm_ms,
+                                total_ms: timingData.total_ms
+                            }));
+                        }
+                        finish();
+                        scrollToBottom();
+                    },
+                    error: (data) => {
+                        const payload = JSON.parse(data);
+                        astContent.textContent = (fullText ? fullText + '\n\n' : '')
+                            + (payload.detail || 'Generation failed.');
+                        finish();
+                        scrollToBottom();
+                    }
+                });
+                finish();
+            } catch (err) {
+                console.error("Stream failed:", err);
+                astContent.textContent = (fullText ? fullText + '\n\n' : '') + '[Connection Error]';
+                finish();
+            }
         });
 
         resetBtn.addEventListener('click', async () => {
+            const requestReset = () => fetch('/session/reset', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ session_id: sessionId })
+            });
+
             try {
-                await fetch('/session/reset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ session_id: sessionId })
-                });
-                
+                let response = await requestReset();
+                if (response.status === 401 && await promptForToken()) {
+                    response = await requestReset();
+                }
+                if (!response.ok) {
+                    console.error("Reset failed:", await errorDetail(response));
+                    return;
+                }
+
                 // Clear UI
                 chatContainer.innerHTML = '<div class="message assistant-message"><div class="role">System</div><div class="content">Context reset. Ready for new query.</div></div>';
             } catch (err) {

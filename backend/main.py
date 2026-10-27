@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -216,12 +216,9 @@ async def chat(req: ChatRequest) -> ChatResponse:
     )
 
 
-@app.get("/chat/stream")
-async def chat_stream(
-    session_id: str = Query(..., min_length=1, max_length=128),
-    message: str = Query(..., min_length=1, max_length=2000),
-) -> EventSourceResponse:
-    return EventSourceResponse(_stream_events(session_id, message))
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest) -> EventSourceResponse:
+    return EventSourceResponse(_stream_events(req.session_id, req.message))
 
 
 async def _stream_events(session_id: str, message: str) -> AsyncGenerator[dict, None]:
