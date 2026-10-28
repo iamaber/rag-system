@@ -1,7 +1,9 @@
-# Bangla RAG System
+# Bangla Product Q&A System
 
-A small Bangla product RAG system built with FastAPI, Groq, and a lightweight
-retrieval pipeline over a product catalog.
+A small Bangla product Q&A system built with FastAPI, Groq, and keyword-based
+SQL retrieval over a product catalog. There are no embeddings and no vector
+search: retrieval matches catalog text with `LIKE` and Postgres full-text
+`tsquery`.
 
 The app:
 

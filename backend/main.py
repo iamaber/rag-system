@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         await close_db()
 
 
-app = FastAPI(title="Bangla RAG System", lifespan=lifespan)
+app = FastAPI(title="Bangla Product Q&A System", lifespan=lifespan)
 app.add_middleware(
     RequestGuard,
     token=settings.api_token,
