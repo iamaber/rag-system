@@ -3,15 +3,16 @@ services:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ragdb
-      POSTGRES_USER: rag
-      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: ${POSTGRES_DB:-ragdb}
+      POSTGRES_USER: ${POSTGRES_USER:-rag_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      APP_DB_USER: ${APP_DB_USER:-rag_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - ./docker/postgres/init-app-role.sh:/docker-entrypoint-initdb.d/01-init-app-role.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rag -d ragdb"]
+      test: ["CMD-SHELL", "pg_isready -U $${APP_DB_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -30,7 +31,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://rag:secret@db:5432/ragdb
+      DATABASE_URL: postgresql://${APP_DB_USER:-rag_app}:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB:-ragdb}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
       CSV_PATH: /data/bangla_products_5k.csv
     volumes:
