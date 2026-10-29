@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -281,7 +281,7 @@ async def reset_session(req: SessionResetRequest) -> dict:
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
+async def health(response: Response) -> HealthResponse:
     uptime = round(time.monotonic() - _start_time, 1)
     try:
         async with get_conn() as conn:
@@ -295,6 +295,7 @@ async def health() -> HealthResponse:
         )
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
+        response.status_code = 503
         return HealthResponse(
             status="degraded",
             db_connected=False,
