@@ -65,13 +65,13 @@ dependencies = [
     { name = "fastapi" },
     { name = "groq" },
     { name = "pydantic-settings" },
-    { name = "python-dotenv" },
     { name = "sse-starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -82,13 +82,13 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "groq", specifier = ">=0.13" },
     { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "sse-starlette", specifier = ">=3.3.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.42.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-asyncio", specifier = ">=1.5.0" },
 ]
