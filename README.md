@@ -36,7 +36,14 @@ cp .env.example .env
 | `DATABASE_URL` | No | `sqlite:////tmp/rag-system.db` | SQLAlchemy-style URL; `postgresql://` uses Postgres. |
 | `CSV_PATH` | No | `data/bangla_products_5k.csv` | Product catalog used to seed an empty database. |
 | `SESSION_TTL_SECONDS` | No | `1800` | Idle session expiry. |
+| `MAX_SESSIONS` | No | `5000` | Session cap; least-recently-used sessions are evicted beyond it. |
 | `MAX_RETRIEVAL_RESULTS` | No | `5` | Result cap per query. |
+| `API_TOKEN` | No | unset | When set, `/chat`, `/chat/stream`, and `/session/reset` require an `X-API-Token` header (or a Bearer token). The bundled UI prompts for it on a 401. |
+| `RATE_LIMIT_PER_MINUTE` | No | `30` | Per-client request cap on the endpoints above. |
+| `MAX_CONCURRENT_LLM_CALLS` | No | `4` | Concurrent upstream generation cap. |
+
+`docker compose` additionally reads `POSTGRES_DB`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `APP_DB_USER`, and `APP_DB_PASSWORD` (see below).
 
 The app starts without `GROQ_API_KEY`. In that mode the UI loads and
 catalog-backed questions are answered; open-ended questions return a clear
@@ -48,13 +55,22 @@ From the repo root:
 
 ```bash
 cp .env.example .env
+# set POSTGRES_PASSWORD and APP_DB_PASSWORD in .env first
 docker compose up --build
 ```
 
 Open <http://localhost:8000/>.
 
-Compose starts Postgres (pgvector) and the backend. Both `.env` files are
-optional, so the stack also starts without a key or env file.
+Compose runs Postgres 16 and the backend built from the root `Dockerfile`
+(which contains the frontend and catalog, so it also runs without compose
+mounts). The database container is not published on the host: only the backend
+can reach it over the compose network, and it connects as the non-superuser
+`APP_DB_USER` role created by `docker/postgres/init-app-role.sh`.
+
+Both `.env` files are otherwise optional, so the stack also starts without a
+Groq key. If you already have a `pgdata` volume from an older compose setup,
+the app role does not exist in it; run `docker compose down -v` (destroys the
+database volume) or create the role manually before starting.
 
 ## Run the backend directly
 
@@ -74,14 +90,18 @@ uv run pytest
 ```
 
 The tests seed a temporary SQLite database from a small fixture catalog and
-exercise the retrieval pipeline, query normalization, and context resolution.
+cover the retrieval pipeline, query normalization, context resolution, the
+catalog reply builders, and the HTTP endpoints (`/chat`, `/chat/stream`,
+`/session/reset`, `/health`). GitHub Actions runs the same suite on every push
+and pull request.
 
 ## Deploy to Hugging Face Spaces
 
-This repo is configured as a Docker Space:
+The repo does not commit Space YAML metadata (it is kept out of the GitHub
+README). When creating a Docker Space from this repo, use:
 
-- `sdk: docker`
-- `app_port: 7860`
+- SDK: `docker`
+- app port: `7860`
 - process binds `0.0.0.0:7860` as a non-root user
 - storage is SQLite at `/tmp`, so no external database is required
 
