@@ -2,7 +2,9 @@ import asyncio
 import csv
 import logging
 import sqlite3
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, cast
 
@@ -94,7 +96,7 @@ async def init_db() -> None:
     if uses_sqlite():
         conn = _connect_sqlite(_sqlite_path())
         try:
-            await _setup_schema(conn)
+            await _apply_migrations(conn)
             await _seed_if_empty(conn)
         finally:
             await conn.close()
@@ -109,7 +111,7 @@ async def init_db() -> None:
     )
     async with _pool.acquire() as raw_conn:
         pg_conn = cast(asyncpg.Connection, raw_conn)
-        await _setup_schema(pg_conn)
+        await _apply_migrations(pg_conn)
         await _seed_if_empty(pg_conn)
         await _backfill_search_vectors(pg_conn)
     logger.info("Database initialized.")
@@ -128,6 +130,48 @@ async def _setup_schema(conn: DBConn) -> None:
     else:
         await _setup_postgres_schema(conn)
     logger.info("Schema ready.")
+
+
+_MIGRATIONS: list[tuple[int, Callable[[DBConn], Awaitable[None]]]] = [
+    (1, _setup_schema),
+]
+
+
+async def _apply_migrations(conn: DBConn) -> None:
+    """Apply numbered migrations that have not run against this database yet.
+
+    Migration 1 is the baseline schema and is idempotent, so databases created
+    before version tracking existed are brought into the system safely.
+    """
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    rows = await conn.fetch("SELECT version FROM schema_migrations")
+    applied = {int(row["version"]) for row in rows}
+
+    for version, migrate in _MIGRATIONS:
+        if version in applied:
+            continue
+        await migrate(conn)
+        applied_at = datetime.now(timezone.utc).isoformat()
+        if isinstance(conn, SQLiteConn):
+            await conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                version,
+                applied_at,
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
+                version,
+                applied_at,
+            )
+        logger.info("Applied migration %d.", version)
 
 
 async def _setup_postgres_schema(conn: asyncpg.Connection) -> None:
