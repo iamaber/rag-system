@@ -66,7 +66,7 @@ app.add_middleware(
 )
 
 # Bound how many requests can hold a paid upstream generation at once.
-_LLM_SLOTS = asyncio.Semaphore(settings.max_concurrent_llm_calls)
+_LLM_SLOTS = asyncio.Semaphore(max(1, settings.max_concurrent_llm_calls))
 
 
 # shared logic used by both /chat and /chat/stream
