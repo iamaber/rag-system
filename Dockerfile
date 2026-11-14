@@ -1,8 +1,5 @@
 FROM python:3.14-slim
 
-RUN useradd -m -u 1000 user
-USER user
-
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:/home/user/app/backend/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
@@ -11,10 +8,19 @@ ENV HOME=/home/user \
     DATABASE_URL=sqlite:////tmp/rag-system.db \
     CSV_PATH=/home/user/app/data/bangla_products_5k.csv
 
+RUN useradd -m -u 1000 user
+
+WORKDIR /home/user/app
+
+COPY --from=ghcr.io/astral-sh/uv:0.13.8 /uv /usr/local/bin/uv
+COPY backend/pyproject.toml backend/uv.lock ./backend/
+
+RUN chown -R user:user /home/user/app
+
+USER user
+
 WORKDIR /home/user/app/backend
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /home/user/.local/bin/uv
-COPY --chown=user backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY --chown=user backend /home/user/app/backend
