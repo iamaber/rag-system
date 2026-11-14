@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 _start_time = time.monotonic()
 _FRONTEND_INDEX = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
+_MISSING_KEY_MESSAGE = (
+    "This deployment has no LLM API key configured, so I can't answer open-ended "
+    "questions. Price, discount, stock, and availability lookups still work. "
+    "Set the GROQ_API_KEY secret (see .env.example) to enable full answers."
+)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
@@ -91,6 +97,9 @@ async def _generate_response(prepared: PreparedChat, message: str) -> str:
     if direct_response is not None:
         return direct_response
 
+    if not llm.is_configured():
+        return _MISSING_KEY_MESSAGE
+
     return await llm.generate(prepared.products, message, prepared.resolved_query)
 
 
@@ -100,6 +109,10 @@ async def _response_deltas(
     direct_response = _catalog_reply(prepared, message)
     if direct_response is not None:
         yield direct_response
+        return
+
+    if not llm.is_configured():
+        yield _MISSING_KEY_MESSAGE
         return
 
     async for delta in llm.stream_generate(
@@ -254,12 +267,19 @@ async def health() -> HealthResponse:
         async with get_conn() as conn:
             count = await conn.fetchval("SELECT COUNT(*) FROM products")
         return HealthResponse(
-            status="ok", db_connected=True, uptime_seconds=uptime, product_count=count
+            status="ok",
+            db_connected=True,
+            llm_configured=llm.is_configured(),
+            uptime_seconds=uptime,
+            product_count=count,
         )
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
         return HealthResponse(
-            status="degraded", db_connected=False, uptime_seconds=uptime
+            status="degraded",
+            db_connected=False,
+            llm_configured=llm.is_configured(),
+            uptime_seconds=uptime,
         )
 
 
