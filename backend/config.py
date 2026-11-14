@@ -4,14 +4,18 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BACKEND_DIR.parent
 DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
-DEFAULT_CSV_PATH = BACKEND_DIR.parent / "data" / "bangla_products_5k.csv"
+REPO_ENV_FILE = REPO_ROOT / ".env"
+DEFAULT_CSV_PATH = REPO_ROOT / "data" / "bangla_products_5k.csv"
 DEFAULT_DATABASE_URL = "sqlite:////tmp/rag-system.db"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=DEFAULT_ENV_FILE, env_file_encoding="utf-8", extra="ignore"
+        env_file=(DEFAULT_ENV_FILE, REPO_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     database_url: str = DEFAULT_DATABASE_URL
