@@ -6,6 +6,7 @@ colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
+license: mit
 ---
 
 # Bangla RAG System
@@ -113,5 +114,6 @@ licensing before production or commercial use.
 
 ## License
 
-No license is declared for this repository. Add a `LICENSE` file before
-redistributing or reusing the code.
+The application code is released under the MIT License; see [LICENSE](LICENSE).
+The product catalog provenance and redistribution terms remain undocumented;
+see [Data](#data). This code licence does not establish rights in third-party data.
