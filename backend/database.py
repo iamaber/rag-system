@@ -175,8 +175,15 @@ async def _seed_if_empty(conn: DBConn) -> None:
         logger.info("Products table already seeded (%d rows). Skipping.", count)
         return
 
-    logger.info("Seeding products from CSV: %s", settings.csv_path)
-    rows = _load_csv(settings.csv_path)
+    csv_file = Path(settings.csv_path)
+    if not csv_file.is_file():
+        logger.warning(
+            "Catalog CSV not found at %s; starting with an empty catalog.", csv_file
+        )
+        return
+
+    logger.info("Seeding products from CSV: %s", csv_file)
+    rows = _load_csv(str(csv_file))
 
     if isinstance(conn, SQLiteConn):
         await conn.executemany(
