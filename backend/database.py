@@ -161,13 +161,17 @@ async def _apply_migrations(conn: DBConn) -> None:
         applied_at = datetime.now(timezone.utc).isoformat()
         if isinstance(conn, SQLiteConn):
             await conn.execute(
-                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 version,
                 applied_at,
             )
         else:
             await conn.execute(
-                "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
+                """
+                INSERT INTO schema_migrations (version, applied_at)
+                VALUES ($1, $2)
+                ON CONFLICT (version) DO NOTHING
+                """,
                 version,
                 applied_at,
             )
