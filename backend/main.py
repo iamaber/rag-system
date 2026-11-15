@@ -63,6 +63,7 @@ app.add_middleware(
     RequestGuard,
     token=settings.api_token,
     limiter=RateLimiter(settings.rate_limit_per_minute),
+    trust_proxy_headers=settings.trust_proxy_headers,
 )
 
 # Bound how many requests can hold a paid upstream generation at once.

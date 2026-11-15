@@ -2,6 +2,11 @@
 
 A sliding-window limiter bounds per-client request rate and an optional shared
 token gates deployments that should not be publicly callable.
+
+The client is the socket peer unless ``trust_proxy_headers`` is enabled, in
+which case it is the address the nearest reverse proxy appended to
+``X-Forwarded-For``. Behind a proxy with the setting off, every visitor shares
+the proxy's address and therefore one bucket.
 """
 
 import secrets
@@ -49,10 +54,18 @@ class RateLimiter:
 class RequestGuard:
     """ASGI middleware enforcing the token and rate limit on paid endpoints."""
 
-    def __init__(self, app: ASGIApp, *, token: str | None, limiter: RateLimiter) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        token: str | None,
+        limiter: RateLimiter,
+        trust_proxy_headers: bool = False,
+    ) -> None:
         self.app = app
         self._token = token
         self._limiter = limiter
+        self._trust_proxy_headers = trust_proxy_headers
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("path") not in PROTECTED_PATHS:
@@ -70,7 +83,7 @@ class RequestGuard:
             )
             return
 
-        client = (scope.get("client") or ("unknown", 0))[0]
+        client = _client_key(scope, headers, self._trust_proxy_headers)
         if not self._limiter.allow(client):
             await _reject(
                 scope,
@@ -83,6 +96,16 @@ class RequestGuard:
             return
 
         await self.app(scope, receive, send)
+
+
+def _client_key(scope: Scope, headers: dict[str, str], trust_proxy_headers: bool) -> str:
+    peer = (scope.get("client") or ("unknown", 0))[0]
+    if not trust_proxy_headers:
+        return peer
+    # Only the last entry was written by the proxy we are connected to; earlier
+    # entries are supplied by the caller and can be forged to dodge the limit.
+    forwarded = headers.get("x-forwarded-for", "").rsplit(",", 1)[-1].strip()
+    return forwarded or peer
 
 
 def _token_matches(headers: dict[str, str], expected: str) -> bool:

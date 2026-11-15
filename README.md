@@ -39,7 +39,8 @@ cp .env.example .env
 | `MAX_SESSIONS` | No | `5000` | Session cap; least-recently-used sessions are evicted beyond it. |
 | `MAX_RETRIEVAL_RESULTS` | No | `5` | Result cap per query. |
 | `API_TOKEN` | No | unset | When set, `/chat`, `/chat/stream`, and `/session/reset` require an `X-API-Token` header (or a Bearer token). The bundled UI prompts for it on a 401. |
-| `RATE_LIMIT_PER_MINUTE` | No | `30` | Per-client request cap on the endpoints above. |
+| `RATE_LIMIT_PER_MINUTE` | No | `30` | Request cap per client address on the endpoints above. Behind a reverse proxy all visitors share the proxy's address, so this is one deployment-wide budget unless `TRUST_PROXY_HEADERS` is enabled. |
+| `TRUST_PROXY_HEADERS` | No | `false` | When `true`, the rate limit is keyed on the last `X-Forwarded-For` entry (the address appended by the nearest proxy) instead of the socket peer. Enable only behind a proxy that sets the header; otherwise callers can forge it. |
 | `MAX_CONCURRENT_LLM_CALLS` | No | `4` | Concurrent upstream generation cap. |
 
 `docker compose` additionally reads `POSTGRES_DB`, `POSTGRES_USER`,

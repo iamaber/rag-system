@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Abuse protection for the LLM-backed endpoints
     api_token: str | None = None
     rate_limit_per_minute: int = 30
+    # Enable only behind a reverse proxy that sets X-Forwarded-For; otherwise
+    # callers could forge the header to dodge the rate limit.
+    trust_proxy_headers: bool = False
     max_concurrent_llm_calls: int = 4
 
     @field_validator("csv_path", mode="before")
